@@ -51,6 +51,8 @@
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <stdint.h>
+#include <linux/types.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -60,6 +62,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <sys/time.h>
 #define __force
 #define __bitwise
 #define __user
@@ -149,9 +152,9 @@ static int print_time(struct compress *compress)
 int main(int argc, char **argv)
 {
 	char *file;
-	unsigned long buffer_size = 100*1024;
+	unsigned long buffer_size = 0;
 	int c;
-	unsigned int card = 0, device = 0, frag = 4;
+	unsigned int card = 0, device = 0, frag = 0;
 
 
 	if (argc < 2)
@@ -203,7 +206,7 @@ void play_samples(char *name, unsigned int card, unsigned int device,
 	FILE *file;
 	char *buffer;
 	int size, num_read, wrote;
-	unsigned int i, channels, rate, bits;
+	unsigned int channels, rate, bits;
 
 	if (verbose)
 		printf("%s: entry\n", __func__);
@@ -223,49 +226,11 @@ void play_samples(char *name, unsigned int card, unsigned int device,
 	codec.id = SND_AUDIOCODEC_MP3;
 	codec.ch_in = channels;
 	codec.ch_out = channels;
-	switch (rate) {
-	case 5512:
-		codec.sample_rate = SNDRV_PCM_RATE_5512;
-		break;
-	case 8000:
-		codec.sample_rate = SNDRV_PCM_RATE_8000;
-		break;
-	case 11025:
-		codec.sample_rate = SNDRV_PCM_RATE_11025;
-		break;
-	case 16000:
-		codec.sample_rate = SNDRV_PCM_RATE_16000;
-		break;
-	case 220500:
-		codec.sample_rate = SNDRV_PCM_RATE_22050;
-		break;
-	case 32000:
-		codec.sample_rate = SNDRV_PCM_RATE_32000;
-		break;
-	case 44100:
-		codec.sample_rate = SNDRV_PCM_RATE_44100;
-		break;
-	case 48000:
-		codec.sample_rate = SNDRV_PCM_RATE_48000;
-		break;
-	case 64000:
-		codec.sample_rate = SNDRV_PCM_RATE_64000;
-		break;
-	case 88200:
-		codec.sample_rate = SNDRV_PCM_RATE_88200;
-		break;
-	case 96000:
-		codec.sample_rate = SNDRV_PCM_RATE_96000;
-		break;
-	case 176400:
-		codec.sample_rate = SNDRV_PCM_RATE_176400;
-		break;
-	case 192000:
-		codec.sample_rate = SNDRV_PCM_RATE_192000;
-		break;
-	default:
-		fprintf(stderr, "unknown sample rate %d\n", rate);
-		goto FILE_EXIT;
+	codec.sample_rate = compress_get_alsa_rate(rate);
+	if (!codec.sample_rate) {
+		fprintf(stderr, "invalid sample rate %d\n", rate);
+		fclose(file);
+		exit(EXIT_FAILURE);
 	}
 	codec.bit_rate = bits;
 	codec.rate_control = 0;
@@ -273,8 +238,14 @@ void play_samples(char *name, unsigned int card, unsigned int device,
 	codec.level = 0;
 	codec.ch_mode = 0;
 	codec.format = 0;
-	config.fragment_size = buffer_size/frag;
-	config.fragments = frag;
+	if ((buffer_size != 0) && (frag != 0)) {
+		config.fragment_size = buffer_size/frag;
+		config.fragments = frag;
+	} else {
+		/* use driver defaults */
+		config.fragment_size = 0;
+		config.fragments = 0;
+	}
 	config.codec = &codec;
 
 	compress = compress_open(card, device, COMPRESS_IN, &config);
@@ -328,7 +299,7 @@ void play_samples(char *name, unsigned int card, unsigned int device,
 				goto BUF_EXIT;
 			}
 			if (wrote != num_read) {
-				/* TODO: Buufer pointer needs to be set here */
+				/* TODO: Buffer pointer needs to be set here */
 				fprintf(stderr, "We wrote %d, DSP accepted %d\n", num_read, wrote);
 			}
 			if (verbose) {
@@ -339,7 +310,7 @@ void play_samples(char *name, unsigned int card, unsigned int device,
 	} while (num_read > 0);
 
 	if (verbose)
-		printf("%s: exit sucess\n", __func__);
+		printf("%s: exit success\n", __func__);
 	/* issue drain if it supports */
 	compress_drain(compress);
 	free(buffer);
