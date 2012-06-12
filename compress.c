@@ -209,25 +209,28 @@ struct compress *compress_open(unsigned int card, unsigned int device,
 	if (!compress || !config)
 		return &bad_compress;
 
-	compress->config = config;
+	compress->config = calloc(1, sizeof(*config));
+	if (!compress->config)
+		goto input_fail;
+	memcpy(compress->config, compress, sizeof(*compress->config));
 
 	snprintf(fn, sizeof(fn), "/dev/snd/comprC%uD%u", card, device);
 
 	compress->flags = flags;
 	if (!((flags & COMPRESS_OUT) || (flags & COMPRESS_IN))) {
 		oops(compress, -EINVAL, "can't deduce device direction from given flags\n");
-		goto input_fail;
+		goto config_fail;
 	}
 	if (flags & COMPRESS_OUT) {
 		/* this should be removed once we have capture tested */
 		oops(compress, -EINVAL, "this version doesnt support capture\n");
-		goto input_fail;
+		goto config_fail;
 	}
 
 	compress->fd = open(fn, O_WRONLY);
 	if (compress->fd < 0) {
 		oops(compress, errno, "cannot open device '%s'", fn);
-		goto input_fail;
+		goto config_fail;
 	}
 #if 0
 	/* FIXME need to turn this On when DSP supports
@@ -250,6 +253,8 @@ struct compress *compress_open(unsigned int card, unsigned int device,
 codec_fail:
 	close(compress->fd);
 	compress->fd = -1;
+config_fail:
+	free(compress->config);
 input_fail:
 	free(compress);
 	return &bad_compress;
@@ -264,6 +269,7 @@ void compress_close(struct compress *compress)
 		close(compress->fd);
 	compress->running = 0;
 	compress->fd = -1;
+	free(compress->config);
 	free(compress);
 }
 
@@ -271,7 +277,7 @@ int compress_get_hpointer(struct compress *compress,
 		unsigned int *avail, struct timespec *tstamp)
 {
 	struct snd_compr_avail kavail;
-	size_t time;
+	__u64 time;
 
 	if (!is_compress_ready(compress))
 		return oops(compress, -ENODEV, "device not ready");
@@ -279,11 +285,10 @@ int compress_get_hpointer(struct compress *compress,
 	if (ioctl(compress->fd, SNDRV_COMPRESS_AVAIL, &kavail))
 		return oops(compress, errno, "cannot get avail");
 	*avail = (unsigned int)kavail.avail;
-
-	time = (kavail.tstamp.pcm_io_frames) / kavail.tstamp.sampling_rate;
+	time = kavail.tstamp.pcm_io_frames / kavail.tstamp.sampling_rate;
 	tstamp->tv_sec = time;
-	time = (kavail.tstamp.pcm_io_frames * 1000000000) / kavail.tstamp.sampling_rate;
-	tstamp->tv_nsec = time;
+	time = kavail.tstamp.pcm_io_frames % kavail.tstamp.sampling_rate;
+	tstamp->tv_nsec = time * 1000000000 / kavail.tstamp.sampling_rate;
 	return 0;
 }
 
@@ -300,12 +305,14 @@ int compress_write(struct compress *compress, char *buf, unsigned int size)
 	fds.fd = compress->fd;
 	fds.events = POLLOUT;
 
+
 	/*TODO: treat auto start here first */
 	while (size) {
 		if (ioctl(compress->fd, SNDRV_COMPRESS_AVAIL, &avail))
 			return oops(compress, errno, "cannot get avail");
 
-		if (avail.avail == 0) {
+		/* we will write only when avail > fragment size */
+		if (avail.avail < compress->config->fragment_size) {
 			/* nothing to write so wait for 10secs */
 			ret = poll(&fds, 1, 1000000);
 			if (ret < 0)
@@ -370,6 +377,13 @@ int compress_pause(struct compress *compress)
 	if (!is_compress_running(compress))
 		return oops(compress, -ENODEV, "device not ready");
 	if (ioctl(compress->fd, SNDRV_COMPRESS_PAUSE))
+		return oops(compress, errno, "cannot pause the stream\n");
+	return 0;
+}
+
+int compress_resume(struct compress *compress)
+{
+	if (ioctl(compress->fd, SNDRV_COMPRESS_RESUME))
 		return oops(compress, errno, "cannot pause the stream\n");
 	return 0;
 }
