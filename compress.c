@@ -236,6 +236,7 @@ struct compress *compress_open(unsigned int card, unsigned int device,
 	compress->config = calloc(1, sizeof(*config));
 	if (!compress->config)
 		goto input_fail;
+	memcpy(compress->config, compress, sizeof(*compress->config));
 
 	snprintf(fn, sizeof(fn), "/dev/snd/comprC%uD%u", card, device);
 
@@ -329,6 +330,7 @@ int compress_get_hpointer(struct compress *compress,
 	tstamp->tv_sec = time;
 	time = kavail.tstamp.pcm_io_frames % kavail.tstamp.sampling_rate;
 	tstamp->tv_nsec = time * 1000000000 / kavail.tstamp.sampling_rate;
+<<<<<<< HEAD
 	return 0;
 }
 
@@ -345,6 +347,8 @@ int compress_get_tstamp(struct compress *compress,
 
 	*samples = ktstamp.pcm_io_frames;
 	*sampling_rate = ktstamp.sampling_rate;
+=======
+>>>>>>> 564413f... [PORT_FROM_ICS]Tinycompress: fixed timestamp and compress_resume issues.
 	return 0;
 }
 
@@ -364,11 +368,13 @@ int compress_write(struct compress *compress, const void *buf, unsigned int size
 	fds.fd = compress->fd;
 	fds.events = POLLOUT;
 
+
 	/*TODO: treat auto start here first */
 	while (size) {
 		if (ioctl(compress->fd, SNDRV_COMPRESS_AVAIL, &avail))
 			return oops(compress, errno, "cannot get avail");
 
+<<<<<<< HEAD
 		/* We can write if we have at least one fragment available
 		 * or there is enough space for all remaining data
 		 */
@@ -385,6 +391,12 @@ int compress_write(struct compress *compress, const void *buf, unsigned int size
 			 * This is not an error, just stop writing */
 			if ((ret == 0) || (ret == -EBADFD))
 				break;
+=======
+		/* we will write only when avail > fragment size */
+		if (avail.avail < compress->config->fragment_size) {
+			/* nothing to write so wait for 10secs */
+			ret = poll(&fds, 1, 1000000);
+>>>>>>> 564413f... [PORT_FROM_ICS]Tinycompress: fixed timestamp and compress_resume issues.
 			if (ret < 0)
 				return oops(compress, errno, "poll error");
 			if (fds.revents & POLLOUT) {
@@ -504,6 +516,13 @@ int compress_resume(struct compress *compress)
 {
 	if (ioctl(compress->fd, SNDRV_COMPRESS_RESUME))
 		return oops(compress, errno, "cannot resume the stream");
+	return 0;
+}
+
+int compress_resume(struct compress *compress)
+{
+	if (ioctl(compress->fd, SNDRV_COMPRESS_RESUME))
+		return oops(compress, errno, "cannot pause the stream\n");
 	return 0;
 }
 
