@@ -212,7 +212,7 @@ struct compress *compress_open(unsigned int card, unsigned int device,
 	compress->config = calloc(1, sizeof(*config));
 	if (!compress->config)
 		goto input_fail;
-	memcpy(compress->config, compress, sizeof(*compress->config));
+	memcpy(compress->config, config, sizeof(*compress->config));
 
 	snprintf(fn, sizeof(fn), "/dev/snd/comprC%uD%u", card, device);
 
