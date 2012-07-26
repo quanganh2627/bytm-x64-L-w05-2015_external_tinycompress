@@ -86,7 +86,7 @@ struct compress {
 	unsigned int flags;
 	char error[COMPR_ERR_MAX];
 	struct compr_config *config;
-	int running;
+	int running:1;
 	int max_poll_wait_ms;
 	int nonblocking;
 	unsigned int gapless_metadata;
