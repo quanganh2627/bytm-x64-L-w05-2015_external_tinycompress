@@ -83,7 +83,7 @@ struct compress {
 	__u64 buffer_size;
 	char error[COMPR_ERR_MAX];
 	struct compr_config *config;
-	int running:1;
+	unsigned int running:1;
 };
 
 static int oops(struct compress *compress, int e, const char *fmt, ...)
@@ -204,7 +204,6 @@ struct compress *compress_open(unsigned int card, unsigned int device,
 	struct compress *compress;
 	struct snd_compr_params params;
 	char fn[256];
-	int rc;
 
 	compress = calloc(1, sizeof(struct compress));
 	if (!compress || !config)
@@ -387,12 +386,10 @@ int compress_drain(struct compress *compress)
 bool is_codec_supported(unsigned int card, unsigned int device,
 		unsigned int flags, struct snd_codec *codec)
 {
-	struct snd_compr_params params;
 	unsigned int dev_flag;
 	bool ret;
 	int fd;
 	char fn[256];
-	int rc;
 
 	snprintf(fn, sizeof(fn), "/dev/snd/comprC%uD%u", card, device);
 
