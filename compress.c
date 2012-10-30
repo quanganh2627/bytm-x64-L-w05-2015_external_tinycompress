@@ -330,7 +330,6 @@ int compress_get_hpointer(struct compress *compress,
 	tstamp->tv_sec = time;
 	time = kavail.tstamp.pcm_io_frames % kavail.tstamp.sampling_rate;
 	tstamp->tv_nsec = time * 1000000000 / kavail.tstamp.sampling_rate;
-<<<<<<< HEAD
 	return 0;
 }
 
@@ -347,8 +346,6 @@ int compress_get_tstamp(struct compress *compress,
 
 	*samples = ktstamp.pcm_io_frames;
 	*sampling_rate = ktstamp.sampling_rate;
-=======
->>>>>>> 564413f... [PORT_FROM_ICS]Tinycompress: fixed timestamp and compress_resume issues.
 	return 0;
 }
 
@@ -374,9 +371,8 @@ int compress_write(struct compress *compress, const void *buf, unsigned int size
 		if (ioctl(compress->fd, SNDRV_COMPRESS_AVAIL, &avail))
 			return oops(compress, errno, "cannot get avail");
 
-<<<<<<< HEAD
-		/* We can write if we have at least one fragment available
-		 * or there is enough space for all remaining data
+        /* We can write if we have at least one fragment available or there
+         * is enough space for all remaining data
 		 */
 		if ((avail.avail < frag_size) && (avail.avail < size)) {
 
@@ -391,12 +387,6 @@ int compress_write(struct compress *compress, const void *buf, unsigned int size
 			 * This is not an error, just stop writing */
 			if ((ret == 0) || (ret == -EBADFD))
 				break;
-=======
-		/* we will write only when avail > fragment size */
-		if (avail.avail < compress->config->fragment_size) {
-			/* nothing to write so wait for 10secs */
-			ret = poll(&fds, 1, 1000000);
->>>>>>> 564413f... [PORT_FROM_ICS]Tinycompress: fixed timestamp and compress_resume issues.
 			if (ret < 0)
 				return oops(compress, errno, "poll error");
 			if (fds.revents & POLLOUT) {
