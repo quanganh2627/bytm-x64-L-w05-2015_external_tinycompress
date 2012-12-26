@@ -393,9 +393,34 @@ int compress_resume(struct compress *compress)
 int compress_drain(struct compress *compress)
 {
 	if (!is_compress_running(compress))
-		return oops(compress, -ENODEV, "device not ready");
+                return oops(compress, -ENODEV, "device not ready");
 	if (ioctl(compress->fd, SNDRV_COMPRESS_DRAIN))
 		return oops(compress, errno, "cannot drain the stream\n");
+	return 0;
+}
+
+int compress_partial_drain(struct compress *compress)
+{
+        if (!is_compress_running(compress))
+                return oops(compress, -ENODEV, "device not ready");
+        if (ioctl(compress->fd, SNDRV_COMPRESS_PARTIAL_DRAIN))
+                return oops(compress, errno, "cannot drain the stream\n");
+        return 0;
+}
+
+int compress_set_metadata(struct compress *compress,
+	struct compr_mdata_config *config)
+{
+	struct snd_compr_metadata metadata;
+
+	metadata.encoder_delay = config->encoder_delay;
+	metadata.encoder_padding = config->encoder_padding;
+
+	if (!is_compress_ready(compress))
+		return oops(compress, -ENODEV, "device not ready");
+
+	if (ioctl(compress->fd, SNDRV_COMPRESS_SET_METADATA, &metadata))
+		return oops(compress, errno, "can't set metadata for stream\n");
 	return 0;
 }
 

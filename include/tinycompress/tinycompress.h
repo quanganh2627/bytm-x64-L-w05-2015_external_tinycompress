@@ -69,6 +69,11 @@ struct compr_config {
 	struct snd_codec *codec;
 };
 
+struct compr_mdata_config {
+	__u32 encoder_delay;
+	__u32 encoder_padding;
+};
+
 #define COMPRESS_OUT        0x00000000
 #define COMPRESS_IN         0x10000000
 
@@ -163,6 +168,29 @@ int compress_resume(struct compress *compress);
  * @compress: compress stream to be drain
  */
 int compress_drain(struct compress *compress);
+
+/*
+ * compress_partial_drain: drain will return after the last frame is decoded
+ * by DSP and will play the , All the data written into compressed
+ * ring buffer is decoded
+ *
+ * return 0 on success, negative on error
+ *
+ * @compress: compress stream to be drain
+ */
+int compress_partial_drain(struct compress *compress);
+
+/*
+ * compress_set_metadata: set metadata of a compress strem
+ *
+ * return 0 on success, negative on error
+ *
+ * @compress: compress stream for which metadata has to set
+ * @config: metadata encoder delay and  padding
+ */
+
+int compress_set_metadata(struct compress *compress,
+			struct compr_mdata_config *config);
 
 /*
  * is_codec_supported:check if the given codec is supported
