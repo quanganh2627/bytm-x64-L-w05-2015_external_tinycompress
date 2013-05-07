@@ -584,7 +584,7 @@ int compress_set_gapless_metadata(struct compress *compress,
 int compress_partial_drain(struct compress *compress)
 {
         if (!is_compress_running(compress))
-                return oops(compress, -ENODEV, "device not ready");
+                return oops(compress, ENODEV, "device not ready");
         if (ioctl(compress->fd, SNDRV_COMPRESS_PARTIAL_DRAIN))
                 return oops(compress, errno, "cannot drain the stream\n");
         return 0;
@@ -599,7 +599,7 @@ int compress_set_metadata(struct compress *compress,
 	metadata.encoder_padding = config->encoder_padding;
 
 	if (!is_compress_ready(compress))
-		return oops(compress, -ENODEV, "device not ready");
+		return oops(compress, ENODEV, "device not ready");
 
 	if (ioctl(compress->fd, SNDRV_COMPRESS_SET_METADATA, &metadata))
 		return oops(compress, errno, "can't set metadata for stream\n");
