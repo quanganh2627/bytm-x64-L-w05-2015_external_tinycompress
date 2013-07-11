@@ -83,7 +83,7 @@ struct compress {
 	__u64 buffer_size;
 	char error[COMPR_ERR_MAX];
 	struct compr_config *config;
-	unsigned int running:1;
+	int running:1;
 };
 
 static int oops(struct compress *compress, int e, const char *fmt, ...)
@@ -96,11 +96,10 @@ static int oops(struct compress *compress, int e, const char *fmt, ...)
 	va_end(ap);
 	sz = strlen(compress->error);
 
-	snprintf(compress->error + sz, COMPR_ERR_MAX - sz,
-		": %s", strerror(e));
-	errno = e;
-
-	return -1;
+	if (errno)
+		snprintf(compress->error + sz, COMPR_ERR_MAX - sz,
+			": %s", strerror(e));
+	return e;
 }
 
 const char *compress_get_error(struct compress *compress)
@@ -140,27 +139,27 @@ static bool _is_codec_supported(struct compress *compress, struct compr_config *
 		}
 	}
 	if (codec == false) {
-		oops(compress, ENXIO, "this codec is not supported");
+		oops(compress, -ENXIO, "this codec is not supported");
 		return false;
 	}
 
 	if (config->fragment_size < caps.min_fragment_size) {
-		oops(compress, EINVAL, "requested fragment size %d is below min supported %d\n",
+		oops(compress, -EINVAL, "requested fragment size %d is below min supported %d\n",
 				config->fragment_size, caps.min_fragment_size);
 		return false;
 	}
 	if (config->fragment_size > caps.max_fragment_size) {
-		oops(compress, EINVAL, "requested fragment size %d is above max supported %d\n",
+		oops(compress, -EINVAL, "requested fragment size %d is above max supported %d\n",
 				config->fragment_size, caps.max_fragment_size);
 		return false;
 	}
 	if (config->fragments < caps.min_fragments) {
-		oops(compress, EINVAL, "requested fragments %d are below min supported %d\n",
+		oops(compress, -EINVAL, "requested fragments %d are below min supported %d\n",
 				config->fragments, caps.min_fragments);
 		return false;
 	}
 	if (config->fragments > caps.max_fragments) {
-		oops(compress, EINVAL, "requested fragments %d are above max supported %d\n",
+		oops(compress, -EINVAL, "requested fragments %d are above max supported %d\n",
 				config->fragments, caps.max_fragments);
 		return false;
 	}
@@ -205,33 +204,31 @@ struct compress *compress_open(unsigned int card, unsigned int device,
 	struct compress *compress;
 	struct snd_compr_params params;
 	char fn[256];
+	int rc;
 
 	compress = calloc(1, sizeof(struct compress));
 	if (!compress || !config)
 		return &bad_compress;
 
-	compress->config = calloc(1, sizeof(*config));
-	if (!compress->config)
-		goto input_fail;
-	memcpy(compress->config, config, sizeof(*compress->config));
+	compress->config = config;
 
 	snprintf(fn, sizeof(fn), "/dev/snd/comprC%uD%u", card, device);
 
 	compress->flags = flags;
 	if (!((flags & COMPRESS_OUT) || (flags & COMPRESS_IN))) {
-		oops(compress, EINVAL, "can't deduce device direction from given flags\n");
-		goto config_fail;
+		oops(compress, -EINVAL, "can't deduce device direction from given flags\n");
+		goto input_fail;
 	}
 	if (flags & COMPRESS_OUT) {
 		/* this should be removed once we have capture tested */
-		oops(compress, EINVAL, "this version doesnt support capture\n");
-		goto config_fail;
+		oops(compress, -EINVAL, "this version doesnt support capture\n");
+		goto input_fail;
 	}
 
 	compress->fd = open(fn, O_WRONLY);
 	if (compress->fd < 0) {
 		oops(compress, errno, "cannot open device '%s'", fn);
-		goto config_fail;
+		goto input_fail;
 	}
 #if 0
 	/* FIXME need to turn this On when DSP supports
@@ -254,8 +251,6 @@ struct compress *compress_open(unsigned int card, unsigned int device,
 codec_fail:
 	close(compress->fd);
 	compress->fd = -1;
-config_fail:
-	free(compress->config);
 input_fail:
 	free(compress);
 	return &bad_compress;
@@ -270,7 +265,6 @@ void compress_close(struct compress *compress)
 		close(compress->fd);
 	compress->running = 0;
 	compress->fd = -1;
-	free(compress->config);
 	free(compress);
 }
 
@@ -278,20 +272,19 @@ int compress_get_hpointer(struct compress *compress,
 		unsigned int *avail, struct timespec *tstamp)
 {
 	struct snd_compr_avail kavail;
-	__u64 time;
+	size_t time;
 
 	if (!is_compress_ready(compress))
-		return oops(compress, ENODEV, "device not ready");
+		return oops(compress, -ENODEV, "device not ready");
 
 	if (ioctl(compress->fd, SNDRV_COMPRESS_AVAIL, &kavail))
 		return oops(compress, errno, "cannot get avail");
-	if (0 == kavail.tstamp.sampling_rate)
-		return oops(compress, EINVAL, "invalid paramter");
 	*avail = (unsigned int)kavail.avail;
-	time = kavail.tstamp.pcm_io_frames / kavail.tstamp.sampling_rate;
+
+	time = (kavail.tstamp.pcm_io_frames) / kavail.tstamp.sampling_rate;
 	tstamp->tv_sec = time;
-	time = kavail.tstamp.pcm_io_frames % kavail.tstamp.sampling_rate;
-	tstamp->tv_nsec = time * 1000000000 / kavail.tstamp.sampling_rate;
+	time = (kavail.tstamp.pcm_io_frames * 1000000000) / kavail.tstamp.sampling_rate;
+	tstamp->tv_nsec = time;
 	return 0;
 }
 
@@ -302,36 +295,34 @@ int compress_write(struct compress *compress, char *buf, unsigned int size)
 	int to_write, written, total = 0, ret;
 
 	if (!(compress->flags & COMPRESS_IN))
-		return oops(compress, EINVAL, "Invalid flag set");
+		return oops(compress, -EINVAL, "Invalid flag set");
 	if (!is_compress_ready(compress))
-		return oops(compress, ENODEV, "device not ready");
+		return oops(compress, -ENODEV, "device not ready");
 	fds.fd = compress->fd;
 	fds.events = POLLOUT;
-
 
 	/*TODO: treat auto start here first */
 	while (size) {
 		if (ioctl(compress->fd, SNDRV_COMPRESS_AVAIL, &avail))
 			return oops(compress, errno, "cannot get avail");
 
-		/* we will write only when avail > fragment size */
-		if (avail.avail < compress->config->fragment_size) {
+		if (avail.avail == 0) {
 			/* nothing to write so wait for 10secs */
 			ret = poll(&fds, 1, 1000000);
 			if (ret < 0)
 				return oops(compress, errno, "poll error");
 			if (ret == 0)
-				return oops(compress, EPIPE, "Poll timeout, Broken Pipe");
+				return oops(compress, -EPIPE, "Poll timeout, Broken Pipe");
 			if (fds.revents & POLLOUT) {
 				if (ioctl(compress->fd, SNDRV_COMPRESS_AVAIL, &avail))
 					return oops(compress, errno, "cannot get avail");
 				if (avail.avail == 0) {
-					oops(compress, EIO, "woken up even when avail is 0!!!");
+					oops(compress, -EIO, "woken up even when avail is 0!!!");
 					continue;
 				}
 			}
 			if (fds.revents & POLLERR) {
-				return oops(compress, EIO, "poll returned error!");
+				return oops(compress, -EIO, "poll returned error!");
 			}
 		}
 		/* write avail bytes */
@@ -352,13 +343,13 @@ int compress_write(struct compress *compress, char *buf, unsigned int size)
 
 int compress_read(struct compress *compress, void *buf, unsigned int size)
 {
-	return oops(compress, ENOTTY, "Not supported yet in lib");
+	return oops(compress, -ENOTTY, "Not supported yet in lib");
 }
 
 int compress_start(struct compress *compress)
 {
 	if (!is_compress_ready(compress))
-		return oops(compress, ENODEV, "device not ready");
+		return oops(compress, -ENODEV, "device not ready");
 	if (ioctl(compress->fd, SNDRV_COMPRESS_START))
 		return oops(compress, errno, "cannot start the stream\n");
 	compress->running = 1;
@@ -369,7 +360,7 @@ int compress_start(struct compress *compress)
 int compress_stop(struct compress *compress)
 {
 	if (!is_compress_running(compress))
-		return oops(compress, ENODEV, "device not ready");
+		return oops(compress, -ENODEV, "device not ready");
 	if (ioctl(compress->fd, SNDRV_COMPRESS_STOP))
 		return oops(compress, errno, "cannot stop the stream\n");
 	return 0;
@@ -378,15 +369,8 @@ int compress_stop(struct compress *compress)
 int compress_pause(struct compress *compress)
 {
 	if (!is_compress_running(compress))
-		return oops(compress, ENODEV, "device not ready");
+		return oops(compress, -ENODEV, "device not ready");
 	if (ioctl(compress->fd, SNDRV_COMPRESS_PAUSE))
-		return oops(compress, errno, "cannot pause the stream\n");
-	return 0;
-}
-
-int compress_resume(struct compress *compress)
-{
-	if (ioctl(compress->fd, SNDRV_COMPRESS_RESUME))
 		return oops(compress, errno, "cannot pause the stream\n");
 	return 0;
 }
@@ -394,44 +378,21 @@ int compress_resume(struct compress *compress)
 int compress_drain(struct compress *compress)
 {
 	if (!is_compress_running(compress))
-                return oops(compress, ENODEV, "device not ready");
+		return oops(compress, -ENODEV, "device not ready");
 	if (ioctl(compress->fd, SNDRV_COMPRESS_DRAIN))
 		return oops(compress, errno, "cannot drain the stream\n");
-	return 0;
-}
-
-int compress_partial_drain(struct compress *compress)
-{
-        if (!is_compress_running(compress))
-                return oops(compress, ENODEV, "device not ready");
-        if (ioctl(compress->fd, SNDRV_COMPRESS_PARTIAL_DRAIN))
-                return oops(compress, errno, "cannot drain the stream\n");
-        return 0;
-}
-
-int compress_set_metadata(struct compress *compress,
-	struct compr_mdata_config *config)
-{
-	struct snd_compr_metadata metadata;
-
-	metadata.encoder_delay = config->encoder_delay;
-	metadata.encoder_padding = config->encoder_padding;
-
-	if (!is_compress_ready(compress))
-		return oops(compress, ENODEV, "device not ready");
-
-	if (ioctl(compress->fd, SNDRV_COMPRESS_SET_METADATA, &metadata))
-		return oops(compress, errno, "can't set metadata for stream\n");
 	return 0;
 }
 
 bool is_codec_supported(unsigned int card, unsigned int device,
 		unsigned int flags, struct snd_codec *codec)
 {
+	struct snd_compr_params params;
 	unsigned int dev_flag;
 	bool ret;
 	int fd;
 	char fn[256];
+	int rc;
 
 	snprintf(fn, sizeof(fn), "/dev/snd/comprC%uD%u", card, device);
 
